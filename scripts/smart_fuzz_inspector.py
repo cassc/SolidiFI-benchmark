@@ -43,9 +43,12 @@ PATTERN_SOURCE_CODE = '{parent}/{bugtype}/buggy_{idx}.sol'
 
 ################################################################################
 
-def replace_keys(d, replacement):
+def replace_keys(d, replacement, assume_bug_type: Optional[str]=None):
     '''Replace keys in a dict using the `replacement` mapping'''
-    return {replacement.get(k, k): v for k, v in d.items()}
+    m = {replacement.get(k, k): v for k, v in d.items()}
+    if assume_bug_type:
+        m[BUGTYPE] = assume_bug_type
+    return m
 
 def replace_vals(d, replacement):
     '''Replace values in a dict using the `replacement` mapping'''
@@ -100,7 +103,8 @@ class InjectedBug():
         bugs = []
         with open(csv_path, 'r') as f:
             reader = csv.DictReader(f, delimiter=',')
-            bugs = [replace_keys(line, BUG_KEY_REPLACEMENT) for line in reader]
+            # assuing one csv file contains only one bug type, so we don't need to check typo in the csv bug_type column
+            bugs = [replace_keys(line, BUG_KEY_REPLACEMENT, self.bug_type) for line in reader]
         bugs = sorted(bugs, key=lambda d: d[LINENUM])
         self.csv_path = csv_path
         self.bugs = bugs
@@ -193,7 +197,7 @@ def pretty_print_report(report: Report):
     print('=' * 80)
     print(report.contract_path)
     stats = report.stats
-    print(f'Injected: {stats.injected:<3}  FP: {stats.fp:<3}  TP: {stats.tp:<3} TP_RANGE: {stats.tp_range}  FN: {stats.fn:<3} ')
+    print(f'Injected: {stats.injected:<3}  FP: {stats.fp:<3}  TP: {stats.tp:<3} TP_RANGE: {stats.tp_range}  FN: {stats.fn:<3} Misclassified: {stats.miscls:<3}')
     if report.fn:
         print('False negatives:')
         pretty_print_bugs(report, report.fn)
@@ -242,6 +246,8 @@ if __name__ == '__main__':
     summary = {
                 "Total": 0,
                 "TP": 0,
+                "TP_Range": 0,
+                "Injected": 0,                
                 "FP": 0,
                 "FN": 0,
                 "Misclassified": 0
@@ -253,10 +259,12 @@ if __name__ == '__main__':
         report = report_file_by_idx(report_files, idx)
         if report:
             stats = report_type(InjectedBug(csv_path), SmartFuzzBug(report), print_raw=args.print_raw)
-            summary["Total"] += stats.tp + stats.fp + stats.fn 
+            summary["Total"] += stats.tp + stats.fp + stats.fn
+            summary["Injected"] += stats.injected
             summary["TP"] += stats.tp
             summary["FP"] += stats.fp
             summary["FN"] += stats.fn
+            summary["TP_Range"] += stats.tp_range
             summary["Misclassified"] +=  stats.miscls
         else:
             print('=' * 80)
@@ -266,5 +274,6 @@ if __name__ == '__main__':
         print ("*"*80)
         print ("Summary :")
         print (summary)
+
         
     
