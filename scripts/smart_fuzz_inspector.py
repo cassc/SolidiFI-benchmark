@@ -29,6 +29,7 @@ BUG_KEY_REPLACEMENT = {'loc': LINENUM,
 BUG_OVERFLOW_UNDERFLOW = 'Overflow-Underflow'
 BUG_REENTRANCY = 'Re-entrancy'
 BUG_TIMESTAMP_DEPENDENCY = 'Timestamp-Dependency'
+BUG_TX_ORIGIN = 'tx.origin'
 
 BUGTYPE_MAPPING = {
     'ARITHMETIC_UNDERFLOW':  BUG_OVERFLOW_UNDERFLOW,
@@ -36,6 +37,8 @@ BUGTYPE_MAPPING = {
     'DANGEROUS_AND:EVM_INTEGER_OVERFLOW_SUBTYPE': BUG_OVERFLOW_UNDERFLOW,
     'REENTRANCY': BUG_REENTRANCY,
     'TIME_STAMP_DEPENDENCY': BUG_TIMESTAMP_DEPENDENCY,
+    'TIMESTAMP': BUG_TIMESTAMP_DEPENDENCY,
+    'TXORIGIN': BUG_TX_ORIGIN
 }
 
 PATTERN_GROUND_TRUTH_CSV = '{parent}/{bugtype}/BugLog_{idx}.csv'
@@ -52,7 +55,7 @@ def replace_vals(d, replacement):
     return {k: (replacement.get(v, v) if isinstance(v, Hashable) else v) for k, v in d.items()}
 
 def idx_from_file(filename: str) -> int:
-    return int(filename.split('.')[0].split('_')[-1])
+    return int(filename.split('.')[-2].split('_')[-1])
 
 def report_file_by_idx(report_files, idx: int) -> Optional[str]:
     try:
@@ -125,7 +128,10 @@ class InjectedBug():
         x_miscls = []     # misclassified: detected, but bug type is not correct
         x_seen_ibugs = [] # found bugs with the correct type
         for r_bug in reported_bugs:
-            i_bug = self.bug_by_line(r_bug[LINENUM])
+            if type(r_bug[LINENUM]) == list:
+                i_bug = self.bug_by_line(r_bug[LINENUM][0])
+            else:
+                i_bug = self.bug_by_line(r_bug[LINENUM])
             true_bug_type = i_bug and i_bug.get(BUGTYPE)
             if true_bug_type:
                 x_seen_ibugs.append(i_bug)
@@ -183,7 +189,10 @@ def read_line(file_path: str, n: int) -> Optional[str]:
 
 def pretty_print_bugs(report: Report, bugs):
     for bug in bugs:
-        start = int(bug[LINENUM])
+        if type(bug[LINENUM]) == list:
+            start = bug[LINENUM][0]
+        else:
+            start = int(bug[LINENUM])
         if 'length' in bug:
             end = start + int(bug["length"])
             print(f'Line {start:>2}-{end:2}')
