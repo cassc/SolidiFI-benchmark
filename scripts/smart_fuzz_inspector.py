@@ -135,7 +135,7 @@ class InjectedBug():
 
         x_fp = []         # detected, but actually these is no bug
         x_tp = []         # detected the correct type
-        x_miscls = []     # misclassified: detected, but bug type is not correct
+        x_miscls = []     # miscellaneous: detected, but belong to another bug type
         x_seen_ibugs = [] # found bugs with the correct type
         for r_bug in reported_bugs:
             # print ("*"*80)
@@ -146,13 +146,16 @@ class InjectedBug():
             # print (true_bug_type)
             if true_bug_type:
                 x_seen_ibugs.append(i_bug)
-            if not true_bug_type:
-                if r_bug[BUGTYPE] == self.bug_type:
-                    x_fp.append(r_bug)
-            elif true_bug_type != r_bug[BUGTYPE]:
-                x_miscls.append((true_bug_type, r_bug))
-            else:
                 x_tp.append(r_bug)
+            else:
+                x_miscls.append((r_bug[BUGTYPE], r_bug))
+            # if not true_bug_type:
+            #     if r_bug[BUGTYPE] == self.bug_type:
+            #         x_fp.append(r_bug)
+            # elif true_bug_type != r_bug[BUGTYPE]:
+            #     x_miscls.append((r_bug[BUGTYPE], r_bug))
+            # else:
+            #     x_tp.append(r_bug)
 
         x_fn = [bug for bug in i_bugs if bug not in x_seen_ibugs]
         fn = len(i_bugs) - len(set([str(b) for b in x_seen_ibugs]))
@@ -197,6 +200,9 @@ def read_line(file_path: str, n: int) -> Optional[str]:
 
 def pretty_print_bugs(report: Report, bugs):
     for bug in bugs:
+        if type(bug) is tuple:
+            print (f"{bug[0]}")
+            bug = bug[1]
         if type(bug[LINENUM]) is list:
             start = int(bug[LINENUM][0])
             end = int(bug[LINENUM][1])
@@ -213,7 +219,7 @@ def pretty_print_bugs(report: Report, bugs):
                 print(f'Line {start:>2}: {read_line(report.contract_path, start)}')
 
 
-def pretty_print_report(report: Report):
+def pretty_print_report(report: Report, print_misc: bool):
     print('=' * 80)
     print(report.contract_path)
     stats = report.stats
@@ -224,17 +230,20 @@ def pretty_print_report(report: Report):
     if report.fp:
         print('False positives:')
         pretty_print_bugs(report, report.fp)
+    if print_misc:
+        print('Miscellaneous:')
+        pretty_print_bugs(report, report.miscls)
 
-def print_report(report, print_raw: bool):
+def print_report(report, print_raw: bool, print_misc: bool):
     from pprint import pprint
     if print_raw:
         pprint(report)
     else:
-        pretty_print_report(report)
+        pretty_print_report(report, print_misc)
 
-def report_type(ibug: InjectedBug, rbug: ToolBug, print_raw: bool=False)->ReportStats:
+def report_type(ibug: InjectedBug, rbug: ToolBug, print_raw: bool=False, print_misc: bool=False)->ReportStats:
     report = ibug.classify(rbug.get_bugs())
-    print_report(report, print_raw)
+    print_report(report, print_raw, print_misc)
     return report.stats
 
 ################################################################################
@@ -254,6 +263,7 @@ if __name__ == '__main__':
     ap.add_argument('-i', '--index', type=int, help='Bug index')
     ap.add_argument('--print-raw', action='store_true', help='Flag to print raw data of report results', default=False)
     ap.add_argument('--print-summary', action='store_true', help='Flag to print summary of report results', default=False)
+    ap.add_argument('--print-misc', action='store_true', help='Flag to print summary of miscellaneous results', default=False)
     args = ap.parse_args()
 
     if args.bug_type not in BUGTYPE_MAPPING.values():
@@ -278,7 +288,7 @@ if __name__ == '__main__':
             continue
         report = report_file_by_idx(report_files, idx)
         if report:
-            stats = report_type(InjectedBug(csv_path), SmartFuzzBug(report), print_raw=args.print_raw)
+            stats = report_type(InjectedBug(csv_path), SmartFuzzBug(report), print_raw=args.print_raw, print_misc=args.print_misc)
             summary["Total"] += stats.tp + stats.fp + stats.fn
             summary["Injected"] += stats.injected
             summary["TP"] += stats.tp
