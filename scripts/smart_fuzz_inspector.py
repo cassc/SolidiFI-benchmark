@@ -29,6 +29,9 @@ BUG_KEY_REPLACEMENT = {'loc': LINENUM,
 BUG_OVERFLOW_UNDERFLOW = 'Overflow-Underflow'
 BUG_REENTRANCY = 'Re-entrancy'
 BUG_TIMESTAMP_DEPENDENCY = 'Timestamp-Dependency'
+BUG_TX_ORIGIN = 'tx.origin'
+BUG_EXCEPTION_DISORDER = 'Unhandled-Exceptions'
+BUG_UNCHECKED_SEND = 'Unchecked-Send'
 
 BUGTYPE_MAPPING = {
     'ARITHMETIC_UNDERFLOW':  BUG_OVERFLOW_UNDERFLOW,
@@ -36,13 +39,18 @@ BUGTYPE_MAPPING = {
     'DANGEROUS_AND:EVM_INTEGER_OVERFLOW_SUBTYPE': BUG_OVERFLOW_UNDERFLOW,
     'REENTRANCY': BUG_REENTRANCY,
     'TIME_STAMP_DEPENDENCY': BUG_TIMESTAMP_DEPENDENCY,
-
+    'TXORIGIN': BUG_TX_ORIGIN,
+    'EXCEPTION_DISORDER': BUG_EXCEPTION_DISORDER,
+    'UNCHECKED_SEND' : BUG_UNCHECKED_SEND,
+    "UNAUTHORIZED_SEND": BUG_UNCHECKED_SEND,
     #RustEVM
     'IntegerOverflow':  BUG_OVERFLOW_UNDERFLOW,
     'IntegerSubUnderflow': BUG_OVERFLOW_UNDERFLOW,
     'PossibleIntegerTruncation': BUG_OVERFLOW_UNDERFLOW,
     'REENTRANCY': BUG_REENTRANCY,
     'TimestampDependency': BUG_TIMESTAMP_DEPENDENCY,
+    "TxOriginDependency": BUG_TX_ORIGIN,
+    "UnauthorizedSend": BUG_UNCHECKED_SEND,
 
 }
 
@@ -63,7 +71,7 @@ def replace_vals(d, replacement):
     return {k: (replacement.get(v, v) if isinstance(v, Hashable) else v) for k, v in d.items()}
 
 def idx_from_file(filename: str) -> int:
-    return int(filename.split('.')[0].split('_')[-1])
+    return int(filename.split('.')[-2].split('_')[-1])
 
 def report_file_by_idx(report_files, idx: int) -> Optional[str]:
     try:
