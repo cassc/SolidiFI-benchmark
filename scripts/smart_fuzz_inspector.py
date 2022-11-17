@@ -16,8 +16,8 @@ import os
 ################################################################################
 
 # Constants used in bug dict keys
-LINENUM = 'linenum'
-BUGTYPE = 'bugtype'
+LINENUM = 'line_number'
+BUGTYPE = 'bug_type'
 
 # Replace dict keys for consistency
 BUG_KEY_REPLACEMENT = {'loc': LINENUM,
@@ -36,6 +36,14 @@ BUGTYPE_MAPPING = {
     'DANGEROUS_AND:EVM_INTEGER_OVERFLOW_SUBTYPE': BUG_OVERFLOW_UNDERFLOW,
     'REENTRANCY': BUG_REENTRANCY,
     'TIME_STAMP_DEPENDENCY': BUG_TIMESTAMP_DEPENDENCY,
+
+    #RustEVM
+    'IntegerOverflow':  BUG_OVERFLOW_UNDERFLOW,
+    'IntegerSubUnderflow': BUG_OVERFLOW_UNDERFLOW,
+    'PossibleIntegerTruncation': BUG_OVERFLOW_UNDERFLOW,
+    'REENTRANCY': BUG_REENTRANCY,
+    'TimestampDependency': BUG_TIMESTAMP_DEPENDENCY,
+
 }
 
 PATTERN_GROUND_TRUTH_CSV = '{parent}/{bugtype}/BugLog_{idx}.csv'
@@ -112,7 +120,7 @@ class InjectedBug():
     @cache
     def bug_by_line(self, linenum: int, candidate_bugs: Optional[List[Dict[str, str]]] = None) -> Optional[Dict[str, str]]:
         '''Returns the injected bug type at a line'''
-        bugs = candidate_bugs or self.bugs 
+        bugs = candidate_bugs or self.bugs
         for bug in bugs:
             ln_start = int(bug[LINENUM])
             ln_end = ln_start + int(bug['length'])
@@ -123,15 +131,19 @@ class InjectedBug():
     def classify(self, reported_bugs: List[Dict[str, Any]]) -> Report:
         '''Classify a bug reported by tool to FP or NP'''
         # i_bugs = [bug for bug in self.bugs if bug.get(BUGTYPE) == self.bug_type]
-        i_bugs = list(self.bugs) # Each csv in `SolidiFI-benchmarks` contains only one type of bugs. So no need to filter 
-        
+        i_bugs = list(self.bugs) # Each csv in `SolidiFI-benchmarks` contains only one type of bugs. So no need to filter
+
         x_fp = []         # detected, but actually these is no bug
         x_tp = []         # detected the correct type
         x_miscls = []     # misclassified: detected, but bug type is not correct
         x_seen_ibugs = [] # found bugs with the correct type
         for r_bug in reported_bugs:
-            i_bug = self.bug_by_line(r_bug[LINENUM])
+            # print ("*"*80)
+            # print (r_bug)
+            # check if bug in range of linenum. take the middle of the range.
+            i_bug = self.bug_by_line((r_bug[LINENUM][0] + r_bug[LINENUM][1])//2)
             true_bug_type = i_bug and i_bug.get(BUGTYPE)
+            # print (true_bug_type)
             if true_bug_type:
                 x_seen_ibugs.append(i_bug)
             if not true_bug_type:
@@ -185,40 +197,48 @@ def read_line(file_path: str, n: int) -> Optional[str]:
 
 def pretty_print_bugs(report: Report, bugs):
     for bug in bugs:
-        start = int(bug[LINENUM])
-        if 'length' in bug:
-            end = start + int(bug["length"])
-            print(f'Line {start:>2}-{end:2}')
+        if type(bug[LINENUM]) is list:
+            start = int(bug[LINENUM][0])
+            end = int(bug[LINENUM][1])
+            if end != start :
+                print(f'Line {start:>2}-{end:2}')
+            else:
+                print(f'Line {start:>2}: {read_line(report.contract_path, start)}')
         else:
-            print(f'Line {start:>2}: {read_line(report.contract_path, start)}')
-            
-    
+            start = int(bug[LINENUM])
+            if 'length' in bug:
+                end = start + int(bug["length"])
+                print(f'Line {start:>2}-{end:2}')
+            else:
+                print(f'Line {start:>2}: {read_line(report.contract_path, start)}')
+
+
 def pretty_print_report(report: Report):
     print('=' * 80)
     print(report.contract_path)
     stats = report.stats
-    print(f'Injected: {stats.injected:<3}  FP: {stats.fp:<3}  TP: {stats.tp:<3} TP_RANGE: {stats.tp_range}  FN: {stats.fn:<3} Misclassified: {stats.miscls:<3}')
+    print(f'Injected: {stats.injected:<3}  FP: {stats.fp:<3}  TP: {stats.tp:<3} TP_RANGE: {stats.tp_range}  FN: {stats.fn:<3} Miscellaneous: {stats.miscls:<3}')
     if report.fn:
         print('False negatives:')
         pretty_print_bugs(report, report.fn)
     if report.fp:
         print('False positives:')
-        pretty_print_bugs(report, report.fp)        
-    
+        pretty_print_bugs(report, report.fp)
+
 def print_report(report, print_raw: bool):
     from pprint import pprint
     if print_raw:
-        pprint(report)        
+        pprint(report)
     else:
         pretty_print_report(report)
-    
+
 def report_type(ibug: InjectedBug, rbug: ToolBug, print_raw: bool=False)->ReportStats:
     report = ibug.classify(rbug.get_bugs())
     print_report(report, print_raw)
     return report.stats
 
-################################################################################    
-        
+################################################################################
+
 if __name__ == '__main__':
     import argparse
     import os
@@ -229,7 +249,7 @@ if __name__ == '__main__':
 
     ap = argparse.ArgumentParser()
     ap.add_argument('--inject-contract-folder', type=str, help='Path to injected buggy contracts folder', default='buggy_contracts')
-    ap.add_argument('--tool-report-folder', type=str, help='Path to folder containing reports generated by analysis tools', default='results/smart-fuzz/analyzed_buggy_contracts')
+    ap.add_argument('--tool-report-folder', type=str, help='Path to folder containing reports generated by analysis tools', default='buggy_contracts')
     ap.add_argument('-t', '--bug-type', type=str, help=f'Bug type. Supported bug types: {", ".join(supported_bugs)}', required=True)
     ap.add_argument('-i', '--index', type=int, help='Bug index')
     ap.add_argument('--print-raw', action='store_true', help='Flag to print raw data of report results', default=False)
@@ -247,10 +267,10 @@ if __name__ == '__main__':
                 "Total": 0,
                 "TP": 0,
                 "TP_Range": 0,
-                "Injected": 0,                
+                "Injected": 0,
                 "FP": 0,
                 "FN": 0,
-                "Misclassified": 0
+                "Miscellaneous": 0
               }
     for csv_path in sorted(ground_truth_csvs, key=idx_from_file):
         idx = idx_from_file(csv_path)
@@ -265,7 +285,7 @@ if __name__ == '__main__':
             summary["FP"] += stats.fp
             summary["FN"] += stats.fn
             summary["TP_Range"] += stats.tp_range
-            summary["Misclassified"] +=  stats.miscls
+            summary["Miscellaneous"] +=  stats.miscls
         else:
             print('=' * 80)
             contract = contract_path_from_csv(csv_path)
@@ -275,5 +295,5 @@ if __name__ == '__main__':
         print ("Summary :")
         print (summary)
 
-        
-    
+
+
