@@ -206,6 +206,10 @@ def read_line(file_path: str, n: int) -> Optional[str]:
         lines = f.readlines()
         return None if len(lines) < n else lines[n-1].strip()
 
+def read_lines(file_path: str, start:int, end:int) -> Optional[str]:
+    with open(file_path, 'r') as f:
+        lines = f.readlines()
+        return None if len(lines) < end else "\n".join(lines[start-1:end])    
 def pretty_print_bugs(report: Report, bugs):
     for bug in bugs:
         if type(bug) is tuple:
@@ -216,6 +220,8 @@ def pretty_print_bugs(report: Report, bugs):
             end = int(bug[LINENUM][1])
             if end != start :
                 print(f'Line {start:>2}-{end:2}')
+                if end-start <=5 : #only print fragment if it's short
+                    print(f'  {read_lines(report.contract_path, start, end)}')
             else:
                 print(f'Line {start:>2}: {read_line(report.contract_path, start)}')
         else:
@@ -272,6 +278,7 @@ if __name__ == '__main__':
     ap.add_argument('--print-raw', action='store_true', help='Flag to print raw data of report results', default=False)
     ap.add_argument('--print-summary', action='store_true', help='Flag to print summary of report results', default=False)
     ap.add_argument('--print-misc', action='store_true', help='Flag to print summary of miscellaneous results', default=False)
+    ap.add_argument('--override-path', action='store_true', help='Flag to overide bugtype folder pattern. The tool report folder will be used as-is', default=False)
     args = ap.parse_args()
 
     if args.bug_type not in BUGTYPE_MAPPING.values():
@@ -280,7 +287,10 @@ if __name__ == '__main__':
         sys.exit(1)
 
     ground_truth_csvs = sorted(glob.glob(os.path.join(args.inject_contract_folder, args.bug_type, '*.csv')))
-    report_files = sorted(SmartFuzzBug.gen_report_file(args.tool_report_folder, args.bug_type))
+    if (not args.override_path):
+        report_files = sorted(SmartFuzzBug.gen_report_file(args.tool_report_folder, args.bug_type))
+    else:
+        report_files = sorted(SmartFuzzBug.gen_report_file(args.tool_report_folder, None))
     summary = {
                 "Total": 0,
                 "TP": 0,
