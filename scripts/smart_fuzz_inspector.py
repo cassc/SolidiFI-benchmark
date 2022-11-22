@@ -12,13 +12,13 @@ import json
 from collections.abc import Hashable
 import glob
 import os
-
+import random
 ################################################################################
 
 # Constants used in bug dict keys
 LINENUM = 'line_number'
 BUGTYPE = 'bug_type'
-
+GLOBAL_COUNTER = 0
 # Replace dict keys for consistency
 BUG_KEY_REPLACEMENT = {'loc': LINENUM,
                        'line_number': LINENUM,
@@ -104,7 +104,7 @@ class Report():
     fp: List[Dict[str, Any]]
     tp: List[Dict[str, Any]]
     fn: List[Dict[str, Any]]
-    miscls: List[Dict[str, Any]]
+    miscls: Dict[str, Any]
     csv_path: str
     contract_path: str
 
@@ -143,7 +143,7 @@ class InjectedBug():
 
         x_fp = []         # detected, but actually these is no bug
         x_tp = []         # detected the correct type
-        x_miscls = []     # miscellaneous: detected, but belong to another bug type
+        x_miscls = {}     # miscellaneous: detected, but belong to another bug type, use dict to avoid duplicate bugs
         x_seen_ibugs = [] # found bugs with the correct type
         for r_bug in reported_bugs:
             # print ("*"*80)
@@ -156,7 +156,7 @@ class InjectedBug():
                 x_seen_ibugs.append(i_bug)
                 x_tp.append(r_bug)
             else:
-                x_miscls.append((r_bug[BUGTYPE], r_bug))
+                x_miscls[(r_bug[BUGTYPE],str(r_bug[LINENUM][0]),str(r_bug[LINENUM][1]))] = r_bug
             # if not true_bug_type:
             #     if r_bug[BUGTYPE] == self.bug_type:
             #         x_fp.append(r_bug)
@@ -209,12 +209,23 @@ def read_line(file_path: str, n: int) -> Optional[str]:
 def read_lines(file_path: str, start:int, end:int) -> Optional[str]:
     with open(file_path, 'r') as f:
         lines = f.readlines()
-        return None if len(lines) < end else "\n".join(lines[start-1:end])    
-def pretty_print_bugs(report: Report, bugs):
+        return None if len(lines) < end else "\n".join(lines[start-1:end])
+def pretty_print_bugs(report: Report, bugs, subsample_rate = 0):
+    global GLOBAL_COUNTER
+    if type(bugs) is dict:
+        bugs = bugs.values()
+    # print (bugs)
+
     for bug in bugs:
+        if subsample_rate != 0 and subsample_rate != 100:
+            if (random.randint(1, 100)) > subsample_rate:
+                continue
+        GLOBAL_COUNTER += 1
         if type(bug) is tuple:
-            print (f"{bug[0]}")
+            print (f"{GLOBAL_COUNTER} - {bug[0]}")
             bug = bug[1]
+        elif type(bug) is dict and BUGTYPE in bug:
+            print (f"{GLOBAL_COUNTER} - {bug[BUGTYPE]}")
         if type(bug[LINENUM]) is list:
             start = int(bug[LINENUM][0])
             end = int(bug[LINENUM][1])
@@ -233,31 +244,32 @@ def pretty_print_bugs(report: Report, bugs):
                 print(f'Line {start:>2}: {read_line(report.contract_path, start)}')
 
 
-def pretty_print_report(report: Report, print_misc: bool):
+def pretty_print_report(report: Report, print_misc: bool, subsample_rate = 0):
     print('=' * 80)
     print(report.contract_path)
     stats = report.stats
-    print(f'Injected: {stats.injected:<3}  FP: {stats.fp:<3}  TP: {stats.tp:<3} TP_RANGE: {stats.tp_range}  FN: {stats.fn:<3} Miscellaneous: {stats.miscls:<3}')
-    if report.fn:
+    if subsample_rate == 0:
+        print(f'Injected: {stats.injected:<3}  FP: {stats.fp:<3}  TP: {stats.tp:<3} TP_RANGE: {stats.tp_range}  FN: {stats.fn:<3} Miscellaneous: {stats.miscls:<3}')
+    if subsample_rate == 0 and report.fn:
         print('False negatives:')
         pretty_print_bugs(report, report.fn)
-    if report.fp:
+    if subsample_rate == 0 and report.fp:
         print('False positives:')
         pretty_print_bugs(report, report.fp)
     if print_misc:
         print('Miscellaneous:')
-        pretty_print_bugs(report, report.miscls)
+        pretty_print_bugs(report, report.miscls, subsample_rate=subsample_rate)
 
-def print_report(report, print_raw: bool, print_misc: bool):
+def print_report(report, print_raw: bool, print_misc: bool, subsample_rate = 0):
     from pprint import pprint
     if print_raw:
         pprint(report)
     else:
-        pretty_print_report(report, print_misc)
+        pretty_print_report(report, print_misc, subsample_rate=subsample_rate)
 
-def report_type(ibug: InjectedBug, rbug: ToolBug, print_raw: bool=False, print_misc: bool=False)->ReportStats:
+def report_type(ibug: InjectedBug, rbug: ToolBug, print_raw: bool=False, print_misc: bool=False, subsample_rate: int=0)->ReportStats:
     report = ibug.classify(rbug.get_bugs())
-    print_report(report, print_raw, print_misc)
+    print_report(report, print_raw, print_misc, subsample_rate)
     return report.stats
 
 ################################################################################
@@ -278,6 +290,8 @@ if __name__ == '__main__':
     ap.add_argument('--print-raw', action='store_true', help='Flag to print raw data of report results', default=False)
     ap.add_argument('--print-summary', action='store_true', help='Flag to print summary of report results', default=False)
     ap.add_argument('--print-misc', action='store_true', help='Flag to print summary of miscellaneous results', default=False)
+    ap.add_argument('--subsample-rate', type=int, help='Rate per 100 for subsampling miscellaneous results e.g. 20 => 20%', default=0)
+    ap.add_argument('--subsample-seed', type=int, help='Random seed for reproducible subsampling of results', default=1)
     ap.add_argument('--override-path', action='store_true', help='Flag to overide bugtype folder pattern. The tool report folder will be used as-is', default=False)
     args = ap.parse_args()
 
@@ -285,6 +299,8 @@ if __name__ == '__main__':
         print('Supported bug types:')
         print(', '.join(supported_bugs))
         sys.exit(1)
+
+    random.seed(args.subsample_seed)
 
     ground_truth_csvs = sorted(glob.glob(os.path.join(args.inject_contract_folder, args.bug_type, '*.csv')))
     if (not args.override_path):
@@ -306,7 +322,7 @@ if __name__ == '__main__':
             continue
         report = report_file_by_idx(report_files, idx)
         if report:
-            stats = report_type(InjectedBug(csv_path), SmartFuzzBug(report), print_raw=args.print_raw, print_misc=args.print_misc)
+            stats = report_type(InjectedBug(csv_path), SmartFuzzBug(report), print_raw=args.print_raw, print_misc=args.print_misc, subsample_rate=args.subsample_rate)
             summary["Total"] += stats.tp + stats.fp + stats.fn
             summary["Injected"] += stats.injected
             summary["TP"] += stats.tp
