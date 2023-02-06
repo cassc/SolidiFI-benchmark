@@ -13,6 +13,7 @@ from collections.abc import Hashable
 import glob
 import os
 import random
+import math
 ################################################################################
 
 # Constants used in bug dict keys
@@ -129,12 +130,17 @@ class InjectedBug():
     def bug_by_line(self, linenum: int, candidate_bugs: Optional[List[Dict[str, str]]] = None) -> Optional[Dict[str, str]]:
         '''Returns the injected bug type at a line'''
         bugs = candidate_bugs or self.bugs
+        # fix bug Overflow-Underflow/buggy_18.sol : 105,4 and 105,10 overlapping, only match the tightest range
+        min_range = 2**32 #some arbitrary big number that SolidiFI never inject pattern with this length 
+        res = None
         for bug in bugs:
             ln_start = int(bug[LINENUM])
             ln_end = ln_start + int(bug['length'])
             if linenum >= ln_start and linenum <= ln_end:
-                return bug
-        return None
+                if int(bug['length']) < min_range:
+                    res = bug
+                    min_range = int(bug['length']) 
+        return res
 
     def classify(self, reported_bugs: List[Dict[str, Any]]) -> Report:
         '''Classify a bug reported by tool to FP or NP'''
@@ -147,11 +153,12 @@ class InjectedBug():
         x_seen_ibugs = [] # found bugs with the correct type
         for r_bug in reported_bugs:
             # print ("*"*80)
-            # print (r_bug)
+            # print (r_bug[LINENUM])
             # check if bug in range of linenum. take the middle of the range.
-            i_bug = self.bug_by_line((r_bug[LINENUM][0] + r_bug[LINENUM][1])//2)
+            # fix the corner case : Overflow-Underflow/buggy46.sol line 21-25 while only line 21 is injected bug
+            i_bug = self.bug_by_line(math.ceil((r_bug[LINENUM][0] + r_bug[LINENUM][1])/2))
             true_bug_type = i_bug and i_bug.get(BUGTYPE)
-            # print (true_bug_type)
+            # print (true_bug_type, i_bug)
             if true_bug_type:
                 x_seen_ibugs.append(i_bug)
                 x_tp.append(r_bug)
@@ -164,9 +171,9 @@ class InjectedBug():
             #     x_miscls.append((r_bug[BUGTYPE], r_bug))
             # else:
             #     x_tp.append(r_bug)
-
         x_fn = [bug for bug in i_bugs if bug not in x_seen_ibugs]
-        fn = len(i_bugs) - len(set([str(b) for b in x_seen_ibugs]))
+        # there are duplicate bugs in i_bugs (190,10,Overflow-Underflow in Overflow-Underflow/buggy_12.sol
+        fn = len(x_fn) # len(set(set([str(b) for b in i_bugs])) - len(set([str(b) for b in x_seen_ibugs]))
         tp_range = len(i_bugs) - fn
         stats = ReportStats(injected=len(i_bugs), fp=len(x_fp), tp=len(x_tp), tp_range=tp_range, miscls=len(x_miscls), fn=fn)
         return Report(stats=stats, fp=x_fp, tp=x_tp, miscls=x_miscls, fn=x_fn, csv_path=csv_path, contract_path=contract_path_from_csv(self.csv_path))
@@ -214,8 +221,8 @@ def pretty_print_bugs(report: Report, bugs, subsample_rate = 0):
     global GLOBAL_COUNTER
     if type(bugs) is dict:
         bugs = bugs.values()
-    # print (bugs)
-
+    print (bugs)
+    
     for bug in bugs:
         if subsample_rate != 0 and subsample_rate != 100:
             if (random.randint(1, 100)) > subsample_rate:
