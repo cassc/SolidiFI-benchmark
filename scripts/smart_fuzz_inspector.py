@@ -130,16 +130,26 @@ class InjectedBug():
     def bug_by_line(self, linenum: int, candidate_bugs: Optional[List[Dict[str, str]]] = None) -> Optional[Dict[str, str]]:
         '''Returns the injected bug type at a line'''
         bugs = candidate_bugs or self.bugs
-        # fix bug Overflow-Underflow/buggy_18.sol : 105,4 and 105,10 overlapping, only match the tightest range
-        min_range = 2**32 #some arbitrary big number that SolidiFI never inject pattern with this length 
-        res = None
+        # fix bug Overflow-Underflow/buggy_18.sol : 105,4 and 105,10 overlapping
+        # fix bug TimeStamp-Dependency/buggy_12.sol: 121,1 and 121,5 overlapping, only the second one is correct
+        # i_bugs should return all matching with the same start-line number
+        
+        res = []
+        start_num = -1
         for bug in bugs:
             ln_start = int(bug[LINENUM])
             ln_end = ln_start + int(bug['length'])
             if linenum >= ln_start and linenum <= ln_end:
-                if int(bug['length']) < min_range:
-                    res = bug
-                    min_range = int(bug['length']) 
+                if start_num == -1:
+                    start_num = ln_start
+                    res.append(bug)
+        # check for overlapping bugs of the same start linenumber 
+        for bug in bugs:
+            ln_start = int(bug[LINENUM])
+            if ln_start == start_num and bug not in res:
+                res.append(bug)
+        if len(res) == 0:
+            return None
         return res
 
     def classify(self, reported_bugs: List[Dict[str, Any]]) -> Report:
@@ -157,10 +167,13 @@ class InjectedBug():
             # check if bug in range of linenum. take the middle of the range.
             # fix the corner case : Overflow-Underflow/buggy46.sol line 21-25 while only line 21 is injected bug
             i_bug = self.bug_by_line(math.ceil((r_bug[LINENUM][0] + r_bug[LINENUM][1])/2))
-            true_bug_type = i_bug and i_bug.get(BUGTYPE)
+            true_bug_type = None
+            if i_bug:
+                true_bug_type = i_bug[0].get(BUGTYPE)
             # print (true_bug_type, i_bug)
             if true_bug_type:
-                x_seen_ibugs.append(i_bug)
+                # rare cases where two injected bugs at the same start line number, they overlap and should be counted both or remove in the csv file.
+                x_seen_ibugs = x_seen_ibugs + i_bug
                 x_tp.append(r_bug)
             else:
                 x_miscls[(r_bug[BUGTYPE],str(r_bug[LINENUM][0]),str(r_bug[LINENUM][1]))] = r_bug
