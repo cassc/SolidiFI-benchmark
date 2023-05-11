@@ -33,7 +33,8 @@ BUG_TIMESTAMP_DEPENDENCY = 'Timestamp-Dependency'
 BUG_TX_ORIGIN = 'tx.origin'
 BUG_EXCEPTION_DISORDER = 'Unhandled-Exceptions'
 BUG_UNCHECKED_SEND = 'Unchecked-Send'
-
+TARGET_BUGTYPE = BUG_OVERFLOW_UNDERFLOW
+CUTOFF_TIME = 2**32
 BUGTYPE_MAPPING = {
     'ARITHMETIC_UNDERFLOW':  BUG_OVERFLOW_UNDERFLOW,
     'ARITHMETIC_OVERFLOW': BUG_OVERFLOW_UNDERFLOW,
@@ -62,6 +63,7 @@ PATTERN_SOURCE_CODE = '{parent}/{bugtype}/buggy_{idx}.sol'
 
 def replace_keys(d, replacement, assume_bug_type: Optional[str]=None):
     '''Replace keys in a dict using the `replacement` mapping'''
+    # print ("replace keys ", d, replacement, assume_bug_type)
     m = {replacement.get(k, k): v for k, v in d.items()}
     if assume_bug_type:
         m[BUGTYPE] = assume_bug_type
@@ -76,7 +78,7 @@ def idx_from_file(filename: str) -> int:
 
 def report_file_by_idx(report_files, idx: int) -> Optional[str]:
     try:
-        return next(f for f in report_files if f'_{idx}.' in f.split(os.path.sep)[-1])
+        return next(f for f in report_files if f'_{idx}.' in f)
     except StopIteration:
         return None
 
@@ -133,7 +135,7 @@ class InjectedBug():
         # fix bug Overflow-Underflow/buggy_18.sol : 105,4 and 105,10 overlapping
         # fix bug TimeStamp-Dependency/buggy_12.sol: 121,1 and 121,5 overlapping, only the second one is correct
         # i_bugs should return all matching with the same start-line number
-        
+
         res = []
         start_num = -1
         for bug in bugs:
@@ -143,7 +145,7 @@ class InjectedBug():
                 if start_num == -1:
                     start_num = ln_start
                     res.append(bug)
-        # check for overlapping bugs of the same start linenumber 
+        # check for overlapping bugs of the same start linenumber
         for bug in bugs:
             ln_start = int(bug[LINENUM])
             if ln_start == start_num and bug not in res:
@@ -162,16 +164,27 @@ class InjectedBug():
         x_miscls = {}     # miscellaneous: detected, but belong to another bug type, use dict to avoid duplicate bugs
         x_seen_ibugs = [] # found bugs with the correct type
         for r_bug in reported_bugs:
+            if int(r_bug.get("time")) > CUTOFF_TIME:
+                continue
             # print ("*"*80)
             # print (r_bug[LINENUM])
             # check if bug in range of linenum. take the middle of the range.
             # fix the corner case : Overflow-Underflow/buggy46.sol line 21-25 while only line 21 is injected bug
             i_bug = self.bug_by_line(math.ceil((r_bug[LINENUM][0] + r_bug[LINENUM][1])/2))
+            # if i_bug and int(i_bug[0].get(LINENUM)) > 720 and int(i_bug[0].get(LINENUM)) < 740:
+            #     print (i_bug)
+            #     print (r_bug)
             true_bug_type = None
             if i_bug:
                 true_bug_type = i_bug[0].get(BUGTYPE)
-            # print (true_bug_type, i_bug)
-            if true_bug_type:
+            # if i_bug and int(i_bug[0].get(LINENUM)) > 720 and int(i_bug[0].get(LINENUM)) < 740:
+            #     print (true_bug_type, i_bug)
+            if true_bug_type and r_bug.get(BUGTYPE) == TARGET_BUGTYPE:
+                # print (r_bug.get(BUGTYPE) == TARGET_BUGTYPE)
+                # print (r_bug.get(BUGTYPE))
+                # print (BUGTYPE_MAPPING.get(true_bug_type), TARGET_BUGTYPE)
+                if i_bug and int(i_bug[0].get(LINENUM)) > 720 and int(i_bug[0].get(LINENUM)) < 740:
+                    print (true_bug_type, i_bug, r_bug)
                 # rare cases where two injected bugs at the same start line number, they overlap and should be counted both or remove in the csv file.
                 x_seen_ibugs = x_seen_ibugs + i_bug
                 x_tp.append(r_bug)
@@ -215,10 +228,13 @@ class SmartFuzzBug(ToolBug):
         return self.bugs
 
     @staticmethod
-    def gen_report_file(parent: str, bug_type: Optional[str]):
+    def gen_report_file(parent: str, bug_type: Optional[str], recursive: bool = False) -> List[str]:
         if bug_type:
             return glob.glob(os.path.join(parent, bug_type, '*.json'))
-        return glob.glob(os.path.join(parent, '*.json'))
+        if recursive:
+            return glob.glob(os.path.join(parent, '**/smartfuzz_result.json'), recursive=True)
+        else:
+            return glob.glob(os.path.join(parent, '*.json'))
 
 ################################################################################
 def read_line(file_path: str, n: int) -> Optional[str]:
@@ -235,7 +251,7 @@ def pretty_print_bugs(report: Report, bugs, subsample_rate = 0):
     if type(bugs) is dict:
         bugs = bugs.values()
     print (bugs)
-    
+
     for bug in bugs:
         if subsample_rate != 0 and subsample_rate != 100:
             if (random.randint(1, 100)) > subsample_rate:
@@ -313,20 +329,23 @@ if __name__ == '__main__':
     ap.add_argument('--subsample-rate', type=int, help='Rate per 100 for subsampling miscellaneous results e.g. 20 => 20%', default=0)
     ap.add_argument('--subsample-seed', type=int, help='Random seed for reproducible subsampling of results', default=1)
     ap.add_argument('--override-path', action='store_true', help='Flag to overide bugtype folder pattern. The tool report folder will be used as-is', default=False)
+    ap.add_argument('--cutoff-time', type=int, help='Cutoff time for analysis tools in seconds', default=2**32)
     args = ap.parse_args()
 
     if args.bug_type not in BUGTYPE_MAPPING.values():
         print('Supported bug types:')
         print(', '.join(supported_bugs))
         sys.exit(1)
-
+    TARGET_BUGTYPE = args.bug_type
+    CUTOFF_TIME = args.cutoff_time
     random.seed(args.subsample_seed)
 
     ground_truth_csvs = sorted(glob.glob(os.path.join(args.inject_contract_folder, args.bug_type, '*.csv')))
     if (not args.override_path):
         report_files = sorted(SmartFuzzBug.gen_report_file(args.tool_report_folder, args.bug_type))
     else:
-        report_files = sorted(SmartFuzzBug.gen_report_file(args.tool_report_folder, None))
+        report_files = sorted(SmartFuzzBug.gen_report_file(args.tool_report_folder, None, recursive=True))
+    # print (report_files)
     summary = {
                 "Total": 0,
                 "TP": 0,
